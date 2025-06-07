@@ -109,43 +109,89 @@ func (g *Graph) Add(id int, vec []float64) error {
 	pos := len(g.nodes)
 	g.idToIdx[id] = pos
 	n := NewNode(id, pos, g.levelFunc())
+
+	// Add node to graph before any references
+	g.nodes = append(g.nodes, n)
+
+	// For first node, just set as enter point
+	if pos == 0 {
+		g.enterPoint = n
+		g.maxLevel = n.level
+		return nil
+	}
+
+	// Find enter point if none exists
+	if g.enterPoint == nil {
+		g.enterPoint = g.nodes[0]
+		g.maxLevel = g.enterPoint.level
+	}
+
+	// Update max level and enter point if needed
 	if n.level > g.maxLevel {
 		g.maxLevel = n.level
 		g.enterPoint = n
 	}
 
-	// Add node to graph before any references
-	g.nodes = append(g.nodes, n)
-
 	// link into graph
-	if g.enterPoint != nil && pos > 0 {
-		cur := g.enterPoint
-		// navigate down
-		for lvl := g.maxLevel; lvl > n.level; lvl-- {
-			cur = g.greedySearchLayer(vec, cur, lvl)
+	cur := g.enterPoint
+	// navigate down through levels
+	for lvl := g.maxLevel; lvl > n.level; lvl-- {
+		next := g.greedySearchLayer(vec, cur, lvl)
+		if next != nil {
+			cur = next
 		}
-		// connect layers
-		for lvl := min(n.level, g.maxLevel); lvl >= 0; lvl-- {
-			cand := g.searchLayer(vec, cur, lvl, g.efConstruction)
-			nbrs := selectNeighbors(cand, g.m)
+	}
 
-			// Add bidirectional connections
-			for _, c := range nbrs {
-				ni := c.idx
-				if ni >= len(g.nodes) {
-					continue
-				}
-				peer := g.nodes[ni]
+	// connect at each level from top to bottom
+	for lvl := min(n.level, g.maxLevel); lvl >= 0; lvl-- {
+		// find candidates
+		candidates := g.searchLayer(vec, cur, lvl, g.efConstruction)
+		if len(candidates) == 0 {
+			candidates = []*candidate{{idx: cur.idx, dist: euclidean(vec, g.getVector(cur.idx))}}
+		}
 
-				// Connect n -> peer
-				n.neighbors = appendLevel(n.neighbors, lvl, ni)
+		// select neighbors for new node
+		nbrs := selectNeighbors(candidates, g.m)
 
-				// Connect peer -> n
-				peer.neighbors = appendLevel(peer.neighbors, lvl, n.idx)
+		// connect bidirectionally
+		for _, c := range nbrs {
+			ni := c.idx
+			if ni >= len(g.nodes) {
+				continue
 			}
+			peer := g.nodes[ni]
 
-			// Update current node for next level
-			cur = g.greedySearchLayer(vec, cur, lvl)
+			// Connect n -> peer
+			n.neighbors = appendLevel(n.neighbors, lvl, ni)
+
+			// Connect peer -> n (ensure peer's neighbors are initialized)
+			peer.neighbors = appendLevel(peer.neighbors, lvl, n.idx)
+
+			// Ensure peer's neighbors stay within limit m
+			if len(peer.neighbors[lvl]) > g.m {
+				// Find distances to all neighbors
+				peerNbrs := make([]*candidate, 0, len(peer.neighbors[lvl]))
+				for _, nbrIdx := range peer.neighbors[lvl] {
+					if nbrIdx >= len(g.nodes) {
+						continue
+					}
+					d := euclidean(g.getVector(peer.idx), g.getVector(nbrIdx))
+					peerNbrs = append(peerNbrs, &candidate{idx: nbrIdx, dist: d})
+				}
+				// Select top m neighbors
+				selected := selectNeighbors(peerNbrs, g.m)
+				newNbrs := make([]int, len(selected))
+				for i, s := range selected {
+					newNbrs[i] = s.idx
+				}
+				peer.neighbors[lvl] = newNbrs
+			}
+		}
+
+		// Update current for next level
+		next := g.greedySearchLayer(vec, cur, lvl)
+		if next != nil {
+			cur = next
 		}
 	}
 	return nil
@@ -163,6 +209,10 @@ func (g *Graph) Search(query []float64, k int) ([]int, error) {
 		return nil, nil
 	}
 
+	if k > len(g.nodes) {
+		k = len(g.nodes)
+	}
+
 	// flush builder
 	if g.builder.Len() > 0 {
 		chunk := g.builder.NewArray().(*array.Float64)
@@ -170,34 +220,45 @@ func (g *Graph) Search(query []float64, k int) ([]int, error) {
 		g.builder = array.NewFloat64Builder(g.allocator)
 	}
 
+	// For small graphs, do exhaustive search
+	if len(g.nodes) <= g.m {
+		cands := make([]*candidate, len(g.nodes))
+		for i := range g.nodes {
+			d := euclidean(query, g.getVector(i))
+			cands[i] = &candidate{idx: i, dist: d}
+		}
+		top := selectNeighbors(cands, k)
+		out := make([]int, len(top))
+		for i, c := range top {
+			out[i] = g.nodes[c.idx].ID
+		}
+		return out, nil
+	}
+
 	// descent
 	ep := g.enterPoint
 	if ep == nil {
-		// If no enter point, use the first node
 		ep = g.nodes[0]
 	}
 	for lvl := g.maxLevel; lvl > 0; lvl-- {
-		ep = g.greedySearchLayer(query, ep, lvl)
-	}
-	// ef search
-	cands := g.searchLayer(query, ep, 0, g.efSearch)
-	if len(cands) == 0 {
-		// If no candidates found, return the closest node
-		closest := g.nodes[0]
-		minDist := euclidean(query, g.getVector(0))
-		for i := 1; i < len(g.nodes); i++ {
-			dist := euclidean(query, g.getVector(i))
-			if dist < minDist {
-				minDist = dist
-				closest = g.nodes[i]
-			}
+		next := g.greedySearchLayer(query, ep, lvl)
+		if next != nil {
+			ep = next
 		}
-		return []int{closest.ID}, nil
 	}
+
+	// ef search
+	cands := g.searchLayer(query, ep, 0, max(g.efSearch, k))
+	if len(cands) == 0 {
+		// If no candidates found, return the closest nodes
+		cands = make([]*candidate, len(g.nodes))
+		for i := range g.nodes {
+			d := euclidean(query, g.getVector(i))
+			cands[i] = &candidate{idx: i, dist: d}
+		}
+	}
+
 	top := selectNeighbors(cands, k)
-	if len(top) == 0 {
-		return nil, nil
-	}
 	out := make([]int, len(top))
 	for i, c := range top {
 		out[i] = g.nodes[c.idx].ID

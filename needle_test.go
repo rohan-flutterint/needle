@@ -3,6 +3,7 @@ package hnsw
 import (
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -172,26 +173,35 @@ func BenchmarkConcurrentAdd(b *testing.B) {
 	efConstruction := 200
 	efSearch := 100
 	chunkSize := 1000
-	alloc := memory.NewGoAllocator()
 
-	g := NewGraph(dim, m, efConstruction, efSearch, chunkSize, alloc)
+	g := NewGraph(dim, m, efConstruction, efSearch, chunkSize, memory.DefaultAllocator)
 
 	// Pre-generate random vectors
 	vectors := make([][]float64, b.N)
 	for i := range vectors {
-		vec := make([]float64, dim)
-		for j := range vec {
-			vec[j] = rand.Float64()
+		vectors[i] = make([]float64, dim)
+		for j := range vectors[i] {
+			vectors[i][j] = rand.Float64()
 		}
-		vectors[i] = vec
 	}
 
-	for i := 0; b.Loop(); i++ {
-		err := g.Add(i, vectors[i])
-		if err != nil {
-			b.Fatal(err)
+	// Use atomic counter for IDs
+	var counter int64
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		// Each goroutine gets its own slice of vectors
+		for pb.Next() {
+			id := atomic.AddInt64(&counter, 1) - 1
+			if int(id) >= len(vectors) {
+				continue
+			}
+			err := g.Add(int(id), vectors[id])
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
-	}
+	})
 }
 
 func BenchmarkConcurrentSearch(b *testing.B) {
@@ -200,37 +210,37 @@ func BenchmarkConcurrentSearch(b *testing.B) {
 	efConstruction := 200
 	efSearch := 100
 	chunkSize := 1000
-	alloc := memory.NewGoAllocator()
+	numPoints := 10000
 
-	g := NewGraph(dim, m, efConstruction, efSearch, chunkSize, alloc)
+	g := NewGraph(dim, m, efConstruction, efSearch, chunkSize, memory.DefaultAllocator)
 
-	// Add some vectors first
-	numVectors := 10000
-	for i := 0; i < numVectors; i++ {
+	// Add points first
+	for i := 0; i < numPoints; i++ {
 		vec := make([]float64, dim)
 		for j := range vec {
 			vec[j] = rand.Float64()
 		}
-		err := g.Add(i, vec)
-		if err != nil {
+		if err := g.Add(i, vec); err != nil {
 			b.Fatal(err)
 		}
 	}
 
-	// Generate random query vectors
+	// Pre-generate queries
 	queries := make([][]float64, b.N)
 	for i := range queries {
-		vec := make([]float64, dim)
-		for j := range vec {
-			vec[j] = rand.Float64()
+		queries[i] = make([]float64, dim)
+		for j := range queries[i] {
+			queries[i][j] = rand.Float64()
 		}
-		queries[i] = vec
 	}
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
+			if i >= len(queries) {
+				continue
+			}
 			_, err := g.Search(queries[i], 10)
 			if err != nil {
 				b.Fatal(err)
@@ -238,4 +248,170 @@ func BenchmarkConcurrentSearch(b *testing.B) {
 			i++
 		}
 	})
+}
+
+func TestHighVolume(t *testing.T) {
+	// Test parameters
+	dim := 128
+	numPoints := 10000
+	m := 16
+	efConstruction := 200
+	efSearch := 100
+	k := 10
+
+	// Create graph
+	g := NewGraph(dim, m, efConstruction, efSearch, 1000, memory.DefaultAllocator)
+
+	// Generate random points
+	points := make([][]float64, numPoints)
+	for i := range points {
+		points[i] = make([]float64, dim)
+		for j := range points[i] {
+			points[i][j] = rand.Float64()
+		}
+	}
+
+	// Add points
+	for i, p := range points {
+		if err := g.Add(i, p); err != nil {
+			t.Fatalf("Add failed: %v", err)
+		}
+	}
+
+	// Verify graph properties
+	if g.Len() != numPoints {
+		t.Errorf("expected %d points, got %d", numPoints, g.Len())
+	}
+
+	// Test search accuracy
+	for i := 0; i < 100; i++ { // Run 100 random queries
+		// Generate query point
+		query := make([]float64, dim)
+		for j := range query {
+			query[j] = rand.Float64()
+		}
+
+		// Get approximate nearest neighbors
+		results, err := g.Search(query, k)
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+
+		// Verify result count
+		if len(results) != k {
+			t.Errorf("expected %d results, got %d", k, len(results))
+		}
+
+		// Verify results are unique
+		seen := make(map[int]bool)
+		for _, r := range results {
+			if seen[r] {
+				t.Errorf("duplicate result found: %d", r)
+			}
+			seen[r] = true
+		}
+
+		// Verify approximate ordering (should be roughly sorted by distance)
+		dists := make([]float64, len(results))
+		for i, r := range results {
+			idx := g.idToIdx[r]
+			dists[i] = euclidean(query, g.getVector(idx))
+		}
+		for i := 1; i < len(dists); i++ {
+			if dists[i] < dists[i-1]*0.5 { // Allow some approximation
+				t.Errorf("results not approximately sorted: %v", dists)
+				break
+			}
+		}
+	}
+}
+
+func TestEdgeCases(t *testing.T) {
+	g := NewGraph(2, 5, 10, 10, 100, memory.DefaultAllocator)
+
+	// Test empty graph
+	results, err := g.Search([]float64{0, 0}, 1)
+	if err != nil {
+		t.Fatalf("Search on empty graph failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results from empty graph, got %d", len(results))
+	}
+
+	// Test single point
+	err = g.Add(1, []float64{1, 1})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	results, err = g.Search([]float64{0, 0}, 1)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+
+	// Test requesting more neighbors than points
+	results, err = g.Search([]float64{0, 0}, 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result when requesting too many, got %d", len(results))
+	}
+
+	// Test dimension mismatch
+	err = g.Add(2, []float64{1, 1, 1})
+	if err == nil {
+		t.Error("expected error for dimension mismatch, got nil")
+	}
+	_, err = g.Search([]float64{1}, 1)
+	if err == nil {
+		t.Error("expected error for dimension mismatch in search, got nil")
+	}
+}
+
+func BenchmarkHighVolume(b *testing.B) {
+	// Benchmark parameters
+	dim := 128
+	numPoints := 100000
+	m := 16
+	efConstruction := 200
+	efSearch := 100
+
+	// Create graph
+	g := NewGraph(dim, m, efConstruction, efSearch, 1000, memory.DefaultAllocator)
+
+	// Generate random points
+	points := make([][]float64, numPoints)
+	for i := range points {
+		points[i] = make([]float64, dim)
+		for j := range points[i] {
+			points[i][j] = rand.Float64()
+		}
+	}
+
+	// Add points (not counted in benchmark)
+	for i, p := range points {
+		if err := g.Add(i, p); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// Generate query points
+	queries := make([][]float64, b.N)
+	for i := range queries {
+		queries[i] = make([]float64, dim)
+		for j := range queries[i] {
+			queries[i][j] = rand.Float64()
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := g.Search(queries[i], 10)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }
