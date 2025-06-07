@@ -1,5 +1,8 @@
 # Needle
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/TFMV/needle)](https://goreportcard.com/report/github.com/TFMV/needle)
+[![Go Reference](https://pkg.go.dev/badge/github.com/TFMV/needle.svg)](https://pkg.go.dev/github.com/TFMV/needle)
+
 **High-Performance HNSW Vector Search in Go**
 
 Needle is a high-performance implementation of Hierarchical Navigable Small World (HNSW) graphs for approximate nearest neighbor search in Go. It uses Apache Arrow for efficient vector storage and provides a thread-safe API for concurrent operations.
