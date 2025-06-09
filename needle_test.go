@@ -63,6 +63,46 @@ func TestAddAndSearch(t *testing.T) {
 	}
 }
 
+func TestAddBatch(t *testing.T) {
+	g := NewGraph(2, 5, 10, 10, 100, memory.DefaultAllocator)
+	g.levelFunc = func() int { return 0 }
+
+	// Test batch add
+	items := make([]struct {
+		ID  int
+		Vec []float64
+	}, 10)
+
+	for i := 0; i < 10; i++ {
+		items[i] = struct {
+			ID  int
+			Vec []float64
+		}{
+			ID:  i,
+			Vec: []float64{float64(i), float64(i)},
+		}
+	}
+
+	err := g.AddBatch(items)
+	if err != nil {
+		t.Fatalf("AddBatch failed: %v", err)
+	}
+
+	if g.Len() != 10 {
+		t.Errorf("expected 10 nodes, got %d", g.Len())
+	}
+
+	// Test search after batch add
+	query := []float64{1.1, 1.1}
+	results, err := g.Search(query, 3)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("expected 3 results, got %d", len(results))
+	}
+}
+
 func TestChunking(t *testing.T) {
 	// For small test graphs, set m to be at least the number of points
 	numPoints := 5
@@ -115,139 +155,6 @@ func TestConcurrentAccess(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-}
-
-func BenchmarkAdd(b *testing.B) {
-	// For benchmarks, use standard HNSW parameters
-	g := NewGraph(128, 16, 200, 100, 1000, memory.DefaultAllocator)
-	g.levelFunc = func() int { return 0 }
-
-	vec := make([]float64, 128)
-	for i := range vec {
-		vec[i] = rand.Float64()
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		vec[0] = rand.Float64() // change vector slightly
-		if err := g.Add(i, vec); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkSearch(b *testing.B) {
-	// For benchmarks, use standard HNSW parameters
-	g := NewGraph(128, 16, 200, 100, 1000, memory.DefaultAllocator)
-	g.levelFunc = func() int { return 0 }
-
-	// Add some points first
-	vec := make([]float64, 128)
-	for i := 0; i < 1000; i++ {
-		for j := range vec {
-			vec[j] = rand.Float64()
-		}
-		if err := g.Add(i, vec); err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	// Generate a query vector
-	query := make([]float64, 128)
-	for i := range query {
-		query[i] = rand.Float64()
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		query[0] = rand.Float64() // change query slightly
-		if _, err := g.Search(query, 10); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkConcurrentAdd(b *testing.B) {
-	dim := 128
-	m := 16
-	efConstruction := 200
-	efSearch := 100
-	chunkSize := 1000
-
-	g := NewGraph(dim, m, efConstruction, efSearch, chunkSize, memory.DefaultAllocator)
-
-	// Pre-generate random vectors
-	vectors := make([][]float64, b.N)
-	for i := range vectors {
-		vectors[i] = make([]float64, dim)
-		for j := range vectors[i] {
-			vectors[i][j] = rand.Float64()
-		}
-	}
-
-	// Use atomic counter for IDs
-	var counter int64
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		// Each goroutine gets its own slice of vectors
-		for pb.Next() {
-			id := atomic.AddInt64(&counter, 1) - 1
-			if int(id) >= len(vectors) {
-				continue
-			}
-			err := g.Add(int(id), vectors[id])
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
-
-func BenchmarkConcurrentSearch(b *testing.B) {
-	dim := 128
-	m := 16
-	efConstruction := 200
-	efSearch := 100
-	chunkSize := 1000
-	numPoints := 10000
-
-	g := NewGraph(dim, m, efConstruction, efSearch, chunkSize, memory.DefaultAllocator)
-
-	// Add points first
-	for i := 0; i < numPoints; i++ {
-		vec := make([]float64, dim)
-		for j := range vec {
-			vec[j] = rand.Float64()
-		}
-		if err := g.Add(i, vec); err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	// Pre-generate queries
-	queries := make([][]float64, b.N)
-	for i := range queries {
-		queries[i] = make([]float64, dim)
-		for j := range queries[i] {
-			queries[i][j] = rand.Float64()
-		}
-	}
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		i := 0
-		for pb.Next() {
-			if i >= len(queries) {
-				continue
-			}
-			_, err := g.Search(queries[i], 10)
-			if err != nil {
-				b.Fatal(err)
-			}
-			i++
-		}
-	})
 }
 
 func TestHighVolume(t *testing.T) {
@@ -369,6 +276,184 @@ func TestEdgeCases(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for dimension mismatch in search, got nil")
 	}
+}
+
+func BenchmarkAdd(b *testing.B) {
+	// For benchmarks, use standard HNSW parameters
+	g := NewGraph(128, 16, 200, 100, 1000, memory.DefaultAllocator)
+	g.levelFunc = func() int { return 0 }
+
+	vec := make([]float64, 128)
+	for i := range vec {
+		vec[i] = rand.Float64()
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		vec[0] = rand.Float64() // change vector slightly
+		if err := g.Add(i, vec); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAddBatch(b *testing.B) {
+	g := NewGraph(128, 16, 200, 100, 1000, memory.DefaultAllocator)
+	g.levelFunc = func() int { return 0 }
+
+	// Pre-generate batch items
+	batchSize := 100
+	batches := make([][]struct {
+		ID  int
+		Vec []float64
+	}, (b.N+batchSize-1)/batchSize)
+
+	for i := range batches {
+		batch := make([]struct {
+			ID  int
+			Vec []float64
+		}, batchSize)
+		for j := range batch {
+			vec := make([]float64, 128)
+			for k := range vec {
+				vec[k] = rand.Float64()
+			}
+			batch[j] = struct {
+				ID  int
+				Vec []float64
+			}{
+				ID:  i*batchSize + j,
+				Vec: vec,
+			}
+		}
+		batches[i] = batch
+	}
+
+	b.ResetTimer()
+	batchIdx := 0
+	for i := 0; i < b.N; i += batchSize {
+		if batchIdx >= len(batches) {
+			break
+		}
+		if err := g.AddBatch(batches[batchIdx]); err != nil {
+			b.Fatal(err)
+		}
+		batchIdx++
+	}
+}
+
+func BenchmarkSearch(b *testing.B) {
+	// For benchmarks, use standard HNSW parameters
+	g := NewGraph(128, 16, 200, 100, 1000, memory.DefaultAllocator)
+	g.levelFunc = func() int { return 0 }
+
+	// Add some points first
+	vec := make([]float64, 128)
+	for i := 0; i < 1000; i++ {
+		for j := range vec {
+			vec[j] = rand.Float64()
+		}
+		if err := g.Add(i, vec); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// Generate a query vector
+	query := make([]float64, 128)
+	for i := range query {
+		query[i] = rand.Float64()
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		query[0] = rand.Float64() // change query slightly
+		if _, err := g.Search(query, 10); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkConcurrentAdd(b *testing.B) {
+	dim := 128
+	m := 16
+	efConstruction := 200
+	efSearch := 100
+	chunkSize := 1000
+
+	g := NewGraph(dim, m, efConstruction, efSearch, chunkSize, memory.DefaultAllocator)
+
+	// Pre-generate random vectors
+	vectors := make([][]float64, b.N)
+	for i := range vectors {
+		vectors[i] = make([]float64, dim)
+		for j := range vectors[i] {
+			vectors[i][j] = rand.Float64()
+		}
+	}
+
+	// Use atomic counter for IDs
+	var counter int64
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		// Each goroutine gets its own slice of vectors
+		for pb.Next() {
+			id := atomic.AddInt64(&counter, 1) - 1
+			if int(id) >= len(vectors) {
+				continue
+			}
+			err := g.Add(int(id), vectors[id])
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkConcurrentSearch(b *testing.B) {
+	dim := 128
+	m := 16
+	efConstruction := 200
+	efSearch := 100
+	chunkSize := 1000
+	numPoints := 10000
+
+	g := NewGraph(dim, m, efConstruction, efSearch, chunkSize, memory.DefaultAllocator)
+
+	// Add points first
+	for i := 0; i < numPoints; i++ {
+		vec := make([]float64, dim)
+		for j := range vec {
+			vec[j] = rand.Float64()
+		}
+		if err := g.Add(i, vec); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// Pre-generate queries
+	queries := make([][]float64, b.N)
+	for i := range queries {
+		queries[i] = make([]float64, dim)
+		for j := range queries[i] {
+			queries[i][j] = rand.Float64()
+		}
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			if i >= len(queries) {
+				continue
+			}
+			_, err := g.Search(queries[i], 10)
+			if err != nil {
+				b.Fatal(err)
+			}
+			i++
+		}
+	})
 }
 
 func BenchmarkHighVolume(b *testing.B) {
