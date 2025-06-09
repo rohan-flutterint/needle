@@ -1,4 +1,4 @@
-package hnsw
+package needle
 
 import (
 	"math/rand"
