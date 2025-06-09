@@ -67,11 +67,11 @@ func main() {
 
 ## Performance Characteristics
 
-- **Single-threaded Add**: ~110μs per vector
-- **Single-threaded Search**: ~12μs per query
+- **Single-threaded Add**: ~110.6μs per vector
+- **Single-threaded Search**: ~12.6μs per query
 - **Batch Add**: ~2.8μs per vector (100 vectors/batch)
-- **Concurrent Add**: ~191μs per vector
-- **Concurrent Search**: ~28μs per query
+- **Concurrent Add**: ~191.1μs per vector
+- **Concurrent Search**: ~28.4μs per query
 - **High Volume Search**: ~116μs per query (with 100,000 vectors)
 
 ## Implementation Details
