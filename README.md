@@ -9,9 +9,11 @@ Needle is a high-performance implementation of Hierarchical Navigable Small Worl
 
 ## Features
 
-- **Efficient Vector Storage**: Uses Apache Arrow for chunked vector storage
-- **Thread-Safe**: Supports concurrent insertions and searches
-- **Memory Efficient**: Zero-allocation search operations using object pools
+- **Efficient Vector Storage**: Uses Apache Arrow for chunked vector storage with zero-copy operations
+- **Thread-Safe**: Supports concurrent insertions and searches with mutex locks
+- **Memory Efficient**: Zero-allocation search operations using object pools and optimized memory management
+- **High Performance**: Optimized neighbor selection with partial sorting and efficient graph traversal
+- **Batch Operations**: Efficient batch vector addition with minimal allocations
 - **Configurable**: Adjustable parameters for search quality vs. speed trade-offs
 - **Production Ready**: Comprehensive test suite and benchmarks
 
@@ -65,21 +67,23 @@ func main() {
 
 ## Performance Characteristics
 
-- **Single-threaded Add**: ~177μs per vector
-- **Single-threaded Search**: ~11μs per query
-- **Concurrent Add**: ~268μs per vector
-- **Concurrent Search**: ~33μs per query
+- **Single-threaded Add**: ~110μs per vector
+- **Single-threaded Search**: ~12μs per query
+- **Batch Add**: ~2.8μs per vector (100 vectors/batch)
+- **Concurrent Add**: ~191μs per vector
+- **Concurrent Search**: ~28μs per query
 - **High Volume Search**: ~116μs per query (with 100,000 vectors)
 
 ## Implementation Details
 
 ### Vector Storage
 
-Vectors are stored in Apache Arrow chunks for efficient memory management and vectorized operations. The chunked storage allows for:
+Vectors are stored in Apache Arrow chunks for efficient memory management and vectorized operations. The chunked storage provides:
 
-- Efficient memory usage
-- Fast vector access
+- Zero-copy vector access
+- Efficient memory usage with configurable chunk sizes
 - Support for large datasets
+- Optimized vector operations
 
 ### Graph Structure
 
@@ -89,15 +93,19 @@ The HNSW graph is implemented with:
 - Bidirectional connections for better search quality
 - Thread-safe operations using mutex locks
 - Object pools for zero-allocation search operations
+- Optimized neighbor selection with partial sorting
+- Efficient memory management for neighbor lists
 
 ### Search Algorithm
 
-The search process:
+The search process is optimized for performance:
 
 1. Starts at the top layer
-2. Navigates down through layers
-3. Performs greedy search at each level
-4. Uses priority queues for efficient neighbor selection
+2. Navigates down through layers using greedy search
+3. Uses priority queues for efficient neighbor selection
+4. Implements partial sorting for better performance
+5. Leverages object pools to minimize allocations
+6. Supports concurrent operations with thread safety
 
 ## Testing
 
