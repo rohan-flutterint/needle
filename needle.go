@@ -1,5 +1,19 @@
-// Package hnsw provides a high-performance, low-allocation HNSW index using arrow-go/v18.
-package hnsw
+// Package needle provides a high-performance, low-allocation HNSW index using arrow-go/v18.
+//
+// This implementation is optimized for speed and memory usage, with a focus on minimizing allocations.
+// It uses a chunked storage approach to efficiently manage large vectors, and a carefully designed
+// graph structure to achieve fast search performance.
+//
+// The main components of the implementation are:
+//
+// 1. Node: Represents a point in the HNSW graph.
+// 2. Graph: The main HNSW index structure.
+// 3. Search functions: Greedy search, layer search, and neighbor selection.
+//
+// The implementation is designed to be efficient and easy to understand, with a focus on
+// minimizing allocations and maximizing performance.
+
+package needle
 
 import (
 	"container/heap"
