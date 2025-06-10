@@ -560,19 +560,6 @@ func euclideanSquared(a, b []float64) float64 {
 	return sum
 }
 
-// Remove unused functions
-// Legacy functions for compatibility
-
-// getVector retrieves internal vector by idx (legacy).
-func (g *Graph) getVector(idx int) []float64 {
-	return g.getVectorFast(idx)
-}
-
-// euclidean distance (legacy).
-func euclidean(a, b []float64) float64 {
-	return math.Sqrt(euclideanSquared(a, b))
-}
-
 // candidate for search.
 type candidate struct {
 	idx  int

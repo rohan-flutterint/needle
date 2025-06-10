@@ -222,7 +222,7 @@ func TestHighVolume(t *testing.T) {
 		dists := make([]float64, len(results))
 		for i, r := range results {
 			idx := g.idToIdx[r]
-			dists[i] = euclidean(query, g.getVector(idx))
+			dists[i] = euclideanSquared(query, g.getVectorFast(idx))
 		}
 		for i := 1; i < len(dists); i++ {
 			if dists[i] < dists[i-1]*0.5 { // Allow some approximation
