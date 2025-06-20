@@ -1,6 +1,6 @@
 # Needle Benchmark Results
 
-This document contains benchmark results comparing the built-in Go implementation
+This document contains benchmark results comparing the Needle Go implementation
 of the HNSW index with hnswlib, a popular Python library. Each benchmark uses synthetic
 vectors generated with the same random seed to ensure reproducibility.
 
@@ -111,5 +111,3 @@ After comprehensive optimization with hnswlib-inspired techniques, needle now ac
 - Arrow ecosystem integration
 - Moderate scale with good performance
 - Development and experimentation environments
-
-needle has evolved from a basic Go implementation to a sophisticated, production-ready HNSW index that delivers competitive performance while maintaining the benefits of pure Go and Arrow architecture.
