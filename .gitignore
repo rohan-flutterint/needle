@@ -16,7 +16,8 @@
 coverage.*
 *.coverprofile
 profile.cov
-
+hnswlib/
+bench/
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
