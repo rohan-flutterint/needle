@@ -14,12 +14,12 @@ import (
 
 // generateData generates n vectors of dimension dim using a fixed seed for reproducibility.
 func generateData(n, dim int) [][]float64 {
-	rand.Seed(42)
+	rng := rand.New(rand.NewSource(42))
 	data := make([][]float64, n)
 	for i := range data {
 		vec := make([]float64, dim)
 		for j := range vec {
-			vec[j] = rand.Float64()
+			vec[j] = rng.Float64()
 		}
 		data[i] = vec
 	}
